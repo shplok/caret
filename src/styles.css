@@ -1,0 +1,311 @@
+:root {
+  --bg: #323437;
+  --sub: #646669;
+  --sub-alt: #2c2e31;
+  --text: #d1d0c5;
+  --accent: #e2b714;
+  --error: #ca4754;
+  --error-extra: #7e2a33;
+  --mono: 'JetBrains Mono', 'Fira Code', 'SF Mono', ui-monospace, Menlo,
+    Consolas, monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--mono);
+  -webkit-font-smoothing: antialiased;
+}
+
+.app {
+  max-width: 1000px;
+  margin: 0 auto;
+  min-height: 100vh;
+  padding: 28px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 26px;
+}
+
+/* top bar */
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 14px;
+}
+
+.logo {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--text);
+  letter-spacing: 0.5px;
+}
+
+.logo-mark {
+  color: var(--accent);
+  margin-right: 4px;
+}
+
+.chips {
+  display: flex;
+  gap: 8px;
+}
+
+.chip {
+  font-family: var(--mono);
+  font-size: 13px;
+  color: var(--sub);
+  background: var(--sub-alt);
+  border: none;
+  border-radius: 8px;
+  padding: 7px 14px;
+  cursor: pointer;
+  transition: color 0.12s, background 0.12s;
+}
+
+.chip:hover {
+  color: var(--text);
+}
+
+.chip.on {
+  color: var(--bg);
+  background: var(--accent);
+  font-weight: 600;
+}
+
+/* snippet meta */
+.meta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.badge {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 3px 9px;
+  border-radius: 6px;
+  background: var(--sub-alt);
+  color: var(--sub);
+  font-weight: 600;
+}
+
+.badge.python {
+  color: #4b8bbe;
+}
+.badge.javascript {
+  color: #e2b714;
+}
+.badge.typescript {
+  color: #4d9de0;
+}
+
+.title {
+  color: var(--sub);
+  font-size: 14px;
+}
+
+/* live stats */
+.stats {
+  display: flex;
+  align-items: center;
+  gap: 28px;
+}
+
+.stat {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.1;
+}
+
+.stat-value {
+  font-size: 26px;
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.stat-label {
+  font-size: 12px;
+  color: var(--sub);
+}
+
+.progressbar {
+  flex: 1;
+  height: 6px;
+  background: var(--sub-alt);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.progressfill {
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.15s ease;
+}
+
+/* code area */
+.code-wrap {
+  position: relative;
+  flex: 1;
+}
+
+.code {
+  font-family: var(--mono);
+  font-size: 22px;
+  line-height: 1.9;
+  white-space: pre;
+  margin: 0;
+  overflow-x: auto;
+  tab-size: 4;
+}
+
+.ch {
+  color: var(--sub);
+  position: relative;
+}
+
+.ch.auto {
+  color: var(--sub);
+}
+
+.ch.correct {
+  color: var(--text);
+}
+
+.ch.incorrect {
+  color: var(--error);
+}
+
+.ch.space.incorrect {
+  background: var(--error-extra);
+  border-radius: 2px;
+}
+
+.ch.newline.incorrect {
+  background: var(--error-extra);
+  border-radius: 2px;
+}
+
+/* blinking caret */
+.caret {
+  display: inline-block;
+  width: 0;
+  border-left: 2px solid var(--accent);
+  height: 1.3em;
+  margin: 0 -1px;
+  vertical-align: text-bottom;
+  animation: blink 1s steps(1) infinite;
+}
+
+@keyframes blink {
+  50% {
+    opacity: 0;
+  }
+}
+
+/* results overlay */
+.results {
+  position: absolute;
+  inset: 0;
+  background: rgba(50, 52, 55, 0.96);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 30px;
+  border-radius: 12px;
+}
+
+.results-grid {
+  display: flex;
+  align-items: flex-end;
+  gap: 40px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.result {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  line-height: 1.1;
+}
+
+.result-value {
+  font-size: 32px;
+  color: var(--text);
+  font-weight: 700;
+}
+
+.result.big .result-value {
+  font-size: 56px;
+  color: var(--accent);
+}
+
+.result-label {
+  font-size: 13px;
+  color: var(--sub);
+  margin-top: 4px;
+}
+
+.results-actions {
+  display: flex;
+  gap: 14px;
+}
+
+.btn {
+  font-family: var(--mono);
+  font-size: 14px;
+  color: var(--sub);
+  background: var(--sub-alt);
+  border: none;
+  border-radius: 8px;
+  padding: 11px 20px;
+  cursor: pointer;
+  transition: color 0.12s, background 0.12s;
+}
+
+.btn:hover {
+  color: var(--text);
+}
+
+.btn.primary {
+  background: var(--accent);
+  color: var(--bg);
+  font-weight: 600;
+}
+
+.btn.primary:hover {
+  filter: brightness(1.08);
+}
+
+/* footer hints */
+.hints {
+  display: flex;
+  gap: 22px;
+  flex-wrap: wrap;
+  color: var(--sub);
+  font-size: 13px;
+}
+
+kbd {
+  background: var(--sub-alt);
+  border-radius: 5px;
+  padding: 2px 7px;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--text);
+}
