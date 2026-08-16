@@ -9,7 +9,6 @@
   --sub: #5b6480;
   --sub-bright: #8b93ad;
   --accent: #5eead4;
-  --accent-2: #38bdf8;
   --error: #fb7185;
   --error-extra: #7f1d3a;
   --mono: 'JetBrains Mono', 'SF Mono', ui-monospace, Menlo, Consolas, monospace;
@@ -27,9 +26,7 @@ body {
 }
 
 body {
-  background:
-    radial-gradient(1200px 600px at 50% -10%, #16203a 0%, transparent 60%),
-    var(--bg);
+  background: var(--bg);
   color: var(--text);
   font-family: var(--ui);
   -webkit-font-smoothing: antialiased;
@@ -55,30 +52,20 @@ body {
 .logo {
   display: flex;
   align-items: center;
-  gap: 10px;
-  font-family: var(--ui);
-  font-size: 24px;
+  font-family: var(--mono);
+  font-size: 22px;
   font-weight: 700;
   letter-spacing: -0.5px;
+  color: var(--text);
 }
 
-.logo-mark {
-  font-family: var(--mono);
-  font-size: 16px;
-  font-weight: 700;
-  color: var(--bg);
-  background: linear-gradient(135deg, var(--accent), var(--accent-2));
-  padding: 5px 8px;
-  border-radius: 8px;
-}
-
-.logo-accent {
-  color: var(--accent);
-}
-
-.tagline {
-  color: var(--sub);
-  font-size: 13px;
+.logo-caret {
+  display: inline-block;
+  width: 3px;
+  height: 20px;
+  margin-left: 3px;
+  background: var(--accent);
+  animation: blink 1s steps(1) infinite;
 }
 
 /* config toolbar */
@@ -169,7 +156,7 @@ body {
 
 .progressfill {
   height: 100%;
-  background: linear-gradient(90deg, var(--accent-2), var(--accent));
+  background: var(--accent);
   transition: width 0.15s ease;
 }
 
@@ -185,7 +172,6 @@ body {
   border: 1px solid var(--border);
   border-radius: 14px;
   overflow: hidden;
-  box-shadow: 0 20px 50px -30px rgba(0, 0, 0, 0.9);
   cursor: text;
 }
 
@@ -327,7 +313,6 @@ body {
   width: 3px;
   border-radius: 2px;
   background: var(--accent);
-  box-shadow: 0 0 8px var(--accent);
   height: 1.3em;
   will-change: left, top;
   transition: left 0.09s ease, top 0.09s ease;

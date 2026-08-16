@@ -302,10 +302,8 @@ export default function App() {
     <div className="app">
       <header className="topbar">
         <div className="logo">
-          <span className="logo-mark">{'{ }'}</span>
-          <span className="logo-text">type<span className="logo-accent">def</span></span>
+          caret<span className="logo-caret" />
         </div>
-        <div className="tagline">type code, not sentences</div>
       </header>
 
       <div className="config">
