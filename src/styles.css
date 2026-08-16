@@ -1,16 +1,16 @@
 :root {
-  /* cool "midnight editor" palette, distinct from the monkeytype look */
-  --bg: #0e1117;
-  --bg-2: #141926;
-  --surface: #171d2b;
-  --surface-2: #1e2536;
-  --border: #262e42;
-  --text: #e6e9f2;
-  --sub: #5b6480;
-  --sub-bright: #8b93ad;
-  --accent: #5eead4;
-  --error: #fb7185;
-  --error-extra: #7f1d3a;
+  /* muted, low-contrast, low-dopamine neutrals with a single desaturated accent */
+  --bg: #17181a;
+  --bg-2: #1b1c1f;
+  --surface: #1d1e21;
+  --surface-2: #242528;
+  --border: #2a2b2f;
+  --text: #a9abae;
+  --sub: #4e4f53;
+  --sub-bright: #74767a;
+  --accent: #8a978c;
+  --error: #9c7676;
+  --error-extra: #3a2a2a;
   --mono: 'JetBrains Mono', 'SF Mono', ui-monospace, Menlo, Consolas, monospace;
   --ui: 'Space Grotesk', system-ui, -apple-system, sans-serif;
 }
@@ -190,19 +190,11 @@ body {
 }
 
 .dot {
-  width: 12px;
-  height: 12px;
+  width: 11px;
+  height: 11px;
   border-radius: 50%;
   display: inline-block;
-}
-.dot.red {
-  background: #ff5f57;
-}
-.dot.yellow {
-  background: #febc2e;
-}
-.dot.green {
-  background: #28c840;
+  background: var(--border);
 }
 
 .filename {
@@ -222,31 +214,6 @@ body {
   border-radius: 6px;
   background: var(--surface-2);
   color: var(--sub);
-}
-
-.lang-tag.python {
-  color: #6ba9dd;
-}
-.lang-tag.javascript {
-  color: #f0d75a;
-}
-.lang-tag.typescript {
-  color: #5fb0f0;
-}
-.lang-tag.c {
-  color: #7fb0e0;
-}
-.lang-tag.cpp {
-  color: #b39be6;
-}
-.lang-tag.java {
-  color: #ef8a3a;
-}
-.lang-tag.rust {
-  color: #e6b48f;
-}
-.lang-tag.assembly {
-  color: #9fb0c4;
 }
 
 .editor-body {
