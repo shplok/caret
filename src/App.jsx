@@ -15,6 +15,7 @@ import {
   resetStats,
   averages,
   formatDuration,
+  formatAgo,
 } from './profile.js'
 import { loadSettings, saveSettings } from './settings.js'
 
@@ -489,6 +490,7 @@ export default function App() {
       acc: a,
       timeMs: elapsed,
       language: lang,
+      at: Date.now(),
     })
     force()
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -510,6 +512,7 @@ export default function App() {
   const avg = averages(profile)
   const langPB = profile.bestByLang[snippet.language] || 0
   const consistency = computeConsistency(eng.samples)
+  const now = accountOpen ? Date.now() : 0
 
   return (
     <div className="app">
@@ -816,6 +819,29 @@ export default function App() {
               </div>
             </div>
 
+            {profile.history && profile.history.length > 0 && (
+              <div className="history">
+                <div className="lang-bests-title">recent tests</div>
+                <HistorySpark history={profile.history} />
+                <div className="history-list">
+                  {profile.history
+                    .slice(-8)
+                    .reverse()
+                    .map((h, i) => (
+                      <div className="history-row" key={i}>
+                        <span className="history-wpm">{h.wpm}</span>
+                        <span className="history-unit">wpm</span>
+                        <span className="history-acc">{h.acc}%</span>
+                        <span className="history-lang">
+                          {LANG_LABELS[h.language] || h.language}
+                        </span>
+                        <span className="history-ago">{formatAgo(h.at, now)}</span>
+                      </div>
+                    ))}
+                </div>
+              </div>
+            )}
+
             <button
               className="btn reset"
               onClick={() => {
@@ -843,6 +869,30 @@ function Toggle({ label, hint, value, onChange }) {
         <span className="toggle-knob" />
       </span>
     </button>
+  )
+}
+
+// compact wpm-over-time sparkline for the recent history in the account modal.
+function HistorySpark({ history }) {
+  const data = (history || []).slice(-30)
+  if (data.length < 2) return null
+  const W = 400
+  const H = 48
+  const pad = 4
+  const maxY = Math.max(10, ...data.map((h) => h.wpm))
+  const x = (i) => pad + (i / (data.length - 1)) * (W - pad * 2)
+  const y = (v) => pad + (1 - v / maxY) * (H - pad * 2)
+  const d = data.map((h, i) => `${i === 0 ? 'M' : 'L'} ${x(i)} ${y(h.wpm)}`).join(' ')
+  return (
+    <svg className="spark" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none">
+      <path className="spark-line" d={d} />
+      <circle
+        className="spark-dot"
+        cx={x(data.length - 1)}
+        cy={y(data[data.length - 1].wpm)}
+        r="2.5"
+      />
+    </svg>
   )
 }
 

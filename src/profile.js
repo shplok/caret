@@ -11,6 +11,7 @@ export function emptyProfile() {
     sumAcc: 0,
     bestWpm: 0,
     bestByLang: {}, // language -> best wpm
+    history: [], // recent finished tests, oldest first: { wpm, acc, timeMs, language, at }
   }
 }
 
@@ -32,7 +33,11 @@ export function saveProfile(p) {
   }
 }
 
-export function recordResult(p, { wpm, acc, timeMs, language }) {
+// keep at most this many recent tests so the profile stays small.
+const HISTORY_CAP = 50
+
+export function recordResult(p, { wpm, acc, timeMs, language, at }) {
+  const entry = { wpm, acc, timeMs, language, at: at || 0 }
   const next = {
     ...p,
     testsCompleted: p.testsCompleted + 1,
@@ -44,6 +49,7 @@ export function recordResult(p, { wpm, acc, timeMs, language }) {
       ...p.bestByLang,
       [language]: Math.max(p.bestByLang[language] || 0, wpm),
     },
+    history: [...(p.history || []), entry].slice(-HISTORY_CAP),
   }
   saveProfile(next)
   return next
@@ -67,6 +73,18 @@ export function averages(p) {
     wpm: Math.round(p.sumWpm / p.testsCompleted),
     acc: Math.round(p.sumAcc / p.testsCompleted),
   }
+}
+
+export function formatAgo(at, now) {
+  if (!at) return ''
+  const s = Math.max(0, Math.round((now - at) / 1000))
+  if (s < 60) return 'just now'
+  const m = Math.floor(s / 60)
+  if (m < 60) return `${m}m ago`
+  const h = Math.floor(m / 60)
+  if (h < 24) return `${h}h ago`
+  const d = Math.floor(h / 24)
+  return `${d}d ago`
 }
 
 export function formatDuration(ms) {
