@@ -115,6 +115,7 @@ export default function App() {
   const profileRef = useRef(loadProfile())
   const accountRef = useRef(false)
   const settingsRef = useRef(false)
+  const capsRef = useRef(false)
 
   const langs = langsRef.current
   const length = lengthRef.current
@@ -123,6 +124,7 @@ export default function App() {
   const profile = profileRef.current
   const accountOpen = accountRef.current
   const settingsOpen = settingsRef.current
+  const capsLock = capsRef.current
 
   // persist the current filters + preferences.
   function persist() {
@@ -271,6 +273,14 @@ export default function App() {
   // keep a fresh handler in a ref so the single window listener never goes stale.
   const handlerRef = useRef(null)
   handlerRef.current = function handleKey(e) {
+    // track caps lock so we can warn about it (a common cause of all errors).
+    if (typeof e.getModifierState === 'function') {
+      const caps = e.getModifierState('CapsLock')
+      if (caps !== capsRef.current) {
+        capsRef.current = caps
+        force()
+      }
+    }
     // ctrl/alt/cmd + backspace deletes the previous word; other modifier combos
     // are left to the browser.
     if (e.ctrlKey || e.metaKey || e.altKey) {
@@ -467,6 +477,7 @@ export default function App() {
   const lineCount = eng.steps.filter((s) => s.type === 'newline').length + 1
   const avg = averages(profile)
   const langPB = profile.bestByLang[snippet.language] || 0
+  const consistency = computeConsistency(eng.samples)
 
   return (
     <div className="app">
@@ -583,6 +594,10 @@ export default function App() {
           </pre>
         </div>
 
+        {capsLock && focused && !eng.finished && !accountOpen && !settingsOpen && (
+          <div className="caps-warn">caps lock is on</div>
+        )}
+
         {!focused && !eng.finished && (
           <div className="focus-note">click or press any key to focus</div>
         )}
@@ -625,6 +640,10 @@ export default function App() {
               <div className="result">
                 <span className="result-value">{eng.errors}</span>
                 <span className="result-label">errors</span>
+              </div>
+              <div className="result">
+                <span className="result-value">{consistency}%</span>
+                <span className="result-label">consistency</span>
               </div>
               <div className="result">
                 <span className="result-value">{avg.wpm || '-'}</span>
@@ -881,6 +900,19 @@ function deleteWord(eng) {
       p = prevTypable(eng.steps, p)
     }
   }
+}
+
+// consistency = how steady the raw speed was, as a percentage. based on the
+// coefficient of variation of the per-second raw samples (monkeytype style).
+function computeConsistency(samples) {
+  const vals = (samples || []).map((s) => s.raw).filter((v) => v > 0)
+  if (vals.length < 2) return 0
+  const mean = vals.reduce((a, b) => a + b, 0) / vals.length
+  if (mean === 0) return 0
+  const variance =
+    vals.reduce((a, b) => a + (b - mean) * (b - mean), 0) / vals.length
+  const cv = Math.sqrt(variance) / mean
+  return Math.max(0, Math.min(100, Math.round((1 - cv) * 100)))
 }
 
 function toggle(prev, lang) {
