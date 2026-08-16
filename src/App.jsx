@@ -446,19 +446,30 @@ export default function App() {
   const caretRef = useRef(null)
   const currentCharRef = useRef(null)
   const bodyRef = useRef(null)
+  const lineRef = useRef(null)
   useLayoutEffect(() => {
     const caret = caretRef.current
     if (!caret) return
-    caret.style.transitionDuration = optsRef.current.smoothCaret ? '' : '0s'
+    const smooth = optsRef.current.smoothCaret
+    caret.style.transitionDuration = smooth ? '' : '0s'
+    const line = lineRef.current
     const cur = currentCharRef.current
     if (eng.finished || !cur) {
       caret.style.opacity = '0'
+      if (line) line.style.opacity = '0'
       return
     }
     caret.style.opacity = '1'
     caret.style.left = `${cur.offsetLeft}px`
     caret.style.top = `${cur.offsetTop}px`
     caret.style.height = `${cur.offsetHeight}px`
+
+    if (line) {
+      line.style.transitionDuration = smooth ? '' : '0s'
+      line.style.opacity = '1'
+      line.style.top = `${cur.offsetTop}px`
+      line.style.height = `${cur.offsetHeight}px`
+    }
 
     const body = bodyRef.current
     if (body && body.scrollHeight > body.clientHeight + 1) {
@@ -616,6 +627,7 @@ export default function App() {
             ))}
           </div>
           <pre className={`code ${focused ? '' : 'blurred'}`}>
+            <span ref={lineRef} className="active-line" />
             <span ref={caretRef} className="caret" />
             {eng.steps.map((step, i) => (
               <span
@@ -639,13 +651,21 @@ export default function App() {
 
         {eng.finished && (
           <div className="results">
-            {(eng.newBest || eng.newLangBest) && (
-              <div className="best-badge">
-                {eng.newBest
-                  ? 'new personal best'
-                  : `new best in ${LANG_LABELS[snippet.language]}`}
-              </div>
-            )}
+            <div className="results-chips">
+              {(eng.newBest || eng.newLangBest) && (
+                <div className="best-badge">
+                  {eng.newBest
+                    ? 'new personal best'
+                    : `new best in ${LANG_LABELS[snippet.language]}`}
+                </div>
+              )}
+              {profile.testsCompleted > 1 && avg.wpm > 0 && (
+                <div className={`delta-chip ${wpm >= avg.wpm ? 'up' : 'down'}`}>
+                  {wpm >= avg.wpm ? '+' : ''}
+                  {wpm - avg.wpm} vs avg
+                </div>
+              )}
+            </div>
             <div className="results-top">
               <div className="results-headline">
                 <div className="result big">
