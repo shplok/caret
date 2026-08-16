@@ -8,6 +8,14 @@ import {
   computeWpm,
   computeAccuracy,
 } from './typing.js'
+import {
+  loadProfile,
+  recordResult,
+  setUsername,
+  resetStats,
+  averages,
+  formatDuration,
+} from './profile.js'
 
 const LENGTHS = ['all', 'short', 'medium', 'long']
 
@@ -55,6 +63,7 @@ function makeEngine(snippet) {
     errors: 0,
     samples: [], // per-second { t, wpm, raw } for the results graph
     lastSec: 0,
+    recorded: false, // whether this finished test was saved to the profile
   }
 }
 
@@ -89,9 +98,24 @@ export default function App() {
   const lengthRef = useRef('all')
   const focusedRef = useRef(true)
 
+  const profileRef = useRef(loadProfile())
+  const accountRef = useRef(false)
+
   const langs = langsRef.current
   const length = lengthRef.current
   const focused = focusedRef.current
+  const profile = profileRef.current
+  const accountOpen = accountRef.current
+
+  function openAccount() {
+    accountRef.current = true
+    force()
+  }
+
+  function closeAccount() {
+    accountRef.current = false
+    force()
+  }
 
   const pool = useMemo(() => {
     let p = snippets.filter((s) => langs.has(s.language))
@@ -174,6 +198,18 @@ export default function App() {
   const handlerRef = useRef(null)
   handlerRef.current = function handleKey(e) {
     if (e.ctrlKey || e.metaKey || e.altKey) return
+    // when the account panel is open, only escape does anything (typing still
+    // reaches the username input because we don't preventDefault other keys)
+    if (accountRef.current) {
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        closeAccount()
+      }
+      return
+    }
+    // don't hijack typing into form fields
+    const tag = e.target && e.target.tagName
+    if (tag === 'INPUT' || tag === 'TEXTAREA') return
     setFocused(true)
     if (e.key === ' ') e.preventDefault() // stop page scroll on space
 
@@ -284,6 +320,23 @@ export default function App() {
     caret.style.height = `${cur.offsetHeight}px`
   })
 
+  // save each finished test to the local profile exactly once.
+  useEffect(() => {
+    const e = engineRef.current
+    if (!e.finished || e.recorded) return
+    e.recorded = true
+    const elapsed = e.endTime - e.startTime
+    const correct = e.statuses.filter((s) => s === 'correct').length
+    profileRef.current = recordResult(profileRef.current, {
+      wpm: computeWpm(correct, elapsed),
+      acc: computeAccuracy(e.correctKeys, e.total),
+      timeMs: elapsed,
+      language: snippetRef.current.language,
+    })
+    force()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [eng.finished])
+
   const correctChars = eng.statuses.filter((s) => s === 'correct').length
   const elapsedMs = eng.started
     ? (eng.finished ? eng.endTime : Date.now()) - eng.startTime
@@ -297,6 +350,7 @@ export default function App() {
 
   const filename = filenameFor(snippet)
   const lineCount = eng.steps.filter((s) => s.type === 'newline').length + 1
+  const avg = averages(profile)
 
   return (
     <div className="app">
@@ -304,6 +358,10 @@ export default function App() {
         <div className="logo">
           caret<span className="logo-caret" />
         </div>
+        <button className="account-btn" onClick={openAccount}>
+          <span className="account-dot" />
+          {profile.username || 'guest'}
+        </button>
       </header>
 
       <div className="config">
@@ -447,6 +505,81 @@ export default function App() {
         <span><kbd>enter</kbd> new line{eng.finished ? ' / next' : ''}</span>
         <span>indentation is auto filled</span>
       </footer>
+
+      {accountOpen && (
+        <div className="modal-backdrop" onClick={closeAccount}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-head">
+              <span className="modal-title">account</span>
+              <button className="modal-close" onClick={closeAccount}>
+                esc
+              </button>
+            </div>
+
+            <label className="field">
+              <span className="field-label">username</span>
+              <input
+                className="field-input"
+                type="text"
+                value={profile.username}
+                placeholder="guest"
+                maxLength={24}
+                onChange={(e) => {
+                  profileRef.current = setUsername(profileRef.current, e.target.value)
+                  force()
+                }}
+              />
+            </label>
+
+            <div className="account-stats">
+              <div className="astat">
+                <span className="astat-value">{profile.testsCompleted}</span>
+                <span className="astat-label">tests completed</span>
+              </div>
+              <div className="astat">
+                <span className="astat-value">{formatDuration(profile.totalTimeMs)}</span>
+                <span className="astat-label">time typing</span>
+              </div>
+              <div className="astat">
+                <span className="astat-value">{profile.bestWpm}</span>
+                <span className="astat-label">best wpm</span>
+              </div>
+              <div className="astat">
+                <span className="astat-value">{avg.wpm}</span>
+                <span className="astat-label">avg wpm</span>
+              </div>
+              <div className="astat">
+                <span className="astat-value">{avg.acc}%</span>
+                <span className="astat-label">avg accuracy</span>
+              </div>
+            </div>
+
+            <div className="lang-bests">
+              <div className="lang-bests-title">best wpm by language</div>
+              <div className="lang-bests-grid">
+                {LANGUAGES.map((lang) => (
+                  <div className="lang-best" key={lang}>
+                    <span className="lang-best-name">{LANG_LABELS[lang]}</span>
+                    <span className="lang-best-value">
+                      {profile.bestByLang[lang] || '-'}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <button
+              className="btn reset"
+              onClick={() => {
+                profileRef.current = resetStats(profileRef.current)
+                force()
+              }}
+            >
+              reset stats
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
