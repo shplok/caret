@@ -294,12 +294,25 @@ body {
   scroll-behavior: smooth;
 }
 
+/* editor font size (set on the .editor wrapper) */
+.editor {
+  --code-size: 24px;
+}
+
+.editor.size-s {
+  --code-size: 19px;
+}
+
+.editor.size-l {
+  --code-size: 30px;
+}
+
 .gutter {
   display: flex;
   flex-direction: column;
   text-align: right;
   font-family: var(--mono);
-  font-size: 24px;
+  font-size: var(--code-size);
   line-height: 1.85;
   color: var(--sub);
   user-select: none;
@@ -311,7 +324,7 @@ body {
 .code {
   position: relative;
   font-family: var(--mono);
-  font-size: 24px;
+  font-size: var(--code-size);
   line-height: 1.85;
   white-space: pre;
   margin: 0;
@@ -516,6 +529,12 @@ body {
 
 .chart .wpm-dot {
   fill: var(--accent);
+}
+
+.results-caption {
+  font-family: var(--mono);
+  font-size: 13px;
+  color: var(--sub);
 }
 
 .results-actions {
@@ -796,6 +815,46 @@ kbd {
 .toggle.on .toggle-knob {
   left: 20px;
   background: var(--bg);
+}
+
+.setting-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 12px;
+}
+
+.seg {
+  display: flex;
+  gap: 3px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 3px;
+}
+
+.seg-btn {
+  font-family: var(--mono);
+  font-size: 13px;
+  text-transform: uppercase;
+  color: var(--sub-bright);
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  padding: 4px 12px;
+  cursor: pointer;
+  transition: color 0.12s, background 0.12s;
+}
+
+.seg-btn:hover {
+  color: var(--text);
+}
+
+.seg-btn.on {
+  color: var(--bg);
+  background: var(--accent);
+  font-weight: 700;
 }
 
 @media (prefers-reduced-motion: reduce) {

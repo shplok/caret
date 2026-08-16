@@ -12,8 +12,11 @@ export function defaultSettings() {
     liveStats: true, // show wpm/acc/time while typing
     sound: false, // soft keypress click
     smoothCaret: true, // glide the caret vs jump instantly
+    fontSize: 'm', // 's' | 'm' | 'l' editor text size
   }
 }
+
+const FONT_SIZES = ['s', 'm', 'l']
 
 export function loadSettings() {
   const d = defaultSettings()
@@ -29,6 +32,7 @@ export function loadSettings() {
       ...s,
       // never let the language filter end up empty (nothing to type)
       languages: languages.length ? languages : d.languages,
+      fontSize: FONT_SIZES.includes(s.fontSize) ? s.fontSize : d.fontSize,
     }
   } catch {
     return d

@@ -86,6 +86,15 @@ function pick(pool, excludeId) {
   return choices[i]
 }
 
+function shuffle(arr) {
+  const a = [...arr]
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1))
+    ;[a[i], a[j]] = [a[j], a[i]]
+  }
+  return a
+}
+
 function classFor(step, status) {
   if (step.type === 'newline') return `ch newline ${status}`
   let c = `ch ${status}`
@@ -110,7 +119,9 @@ export default function App() {
     liveStats: init.liveStats,
     sound: init.sound,
     smoothCaret: init.smoothCaret,
+    fontSize: init.fontSize,
   })
+  const deckRef = useRef({ sig: '', ids: [] })
 
   const profileRef = useRef(loadProfile())
   const accountRef = useRef(false)
@@ -161,6 +172,12 @@ export default function App() {
     force()
   }
 
+  function setOpt(key, value) {
+    optsRef.current = { ...optsRef.current, [key]: value }
+    persist()
+    force()
+  }
+
   const pool = useMemo(() => {
     let p = snippets.filter((s) => langs.has(s.language))
     if (length !== 'all') {
@@ -185,8 +202,23 @@ export default function App() {
     force()
   }
 
+  // draw the next snippet from a shuffled deck so every snippet in the current
+  // pool appears once before any repeats.
+  function drawNext(excludeId) {
+    const sig = pool.map((s) => s.id).sort().join(',')
+    let deck = deckRef.current
+    if (deck.sig !== sig || deck.ids.length === 0) {
+      deck = { sig, ids: shuffle(pool.map((s) => s.id)) }
+    }
+    let idx = 0
+    if (deck.ids[0] === excludeId && deck.ids.length > 1) idx = 1
+    const [id] = deck.ids.splice(idx, 1)
+    deckRef.current = deck
+    return pool.find((s) => s.id === id) || pick(pool, excludeId)
+  }
+
   function goNext() {
-    loadSnippet(pick(pool, snippetRef.current.id))
+    loadSnippet(drawNext(snippetRef.current.id))
   }
 
   function setLangs(updater) {
@@ -560,7 +592,7 @@ export default function App() {
         </div>
       )}
 
-      <div className="editor" onClick={() => setFocused(true)}>
+      <div className={`editor size-${opts.fontSize}`} onClick={() => setFocused(true)}>
         <div className="editor-bar">
           <div className="dots">
             <span className="dot red" />
@@ -650,6 +682,9 @@ export default function App() {
                 <span className="result-label">your avg</span>
               </div>
             </div>
+            <div className="results-caption">
+              {snippet.title} · {LANG_LABELS[snippet.language]}
+            </div>
             <div className="results-actions">
               <button className="btn primary" onClick={goNext}>
                 next snippet
@@ -697,6 +732,23 @@ export default function App() {
                 value={opts.smoothCaret}
                 onChange={() => toggleOpt('smoothCaret')}
               />
+              <div className="setting-row">
+                <span className="toggle-text">
+                  <span className="toggle-label">font size</span>
+                  <span className="toggle-hint">size of the code you type</span>
+                </span>
+                <div className="seg">
+                  {['s', 'm', 'l'].map((sz) => (
+                    <button
+                      key={sz}
+                      className={`seg-btn ${opts.fontSize === sz ? 'on' : ''}`}
+                      onClick={() => setOpt('fontSize', sz)}
+                    >
+                      {sz}
+                    </button>
+                  ))}
+                </div>
+              </div>
             </div>
           </div>
         </div>
