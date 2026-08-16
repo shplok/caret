@@ -16,6 +16,7 @@ import {
   averages,
   formatDuration,
 } from './profile.js'
+import { loadSettings, saveSettings } from './settings.js'
 
 const LENGTHS = ['all', 'short', 'medium', 'long']
 
@@ -64,6 +65,8 @@ function makeEngine(snippet) {
     samples: [], // per-second { t, wpm, raw } for the results graph
     lastSec: 0,
     recorded: false, // whether this finished test was saved to the profile
+    newBest: false, // beat the all-time best wpm
+    newLangBest: false, // beat the best wpm for this language
   }
 }
 
@@ -93,19 +96,42 @@ function classFor(step, status) {
 export default function App() {
   const [, force] = useReducer((c) => c + 1, 0)
 
-  // filter state kept in refs so the single key handler always reads fresh values.
-  const langsRef = useRef(new Set(LANGUAGES))
-  const lengthRef = useRef('all')
+  // load persisted settings once.
+  const initRef = useRef(null)
+  if (initRef.current === null) initRef.current = loadSettings()
+  const init = initRef.current
+
+  // filter/preference state kept in refs so the single key handler always reads
+  // fresh values without re-subscribing the window listener.
+  const langsRef = useRef(new Set(init.languages))
+  const lengthRef = useRef(init.length)
   const focusedRef = useRef(true)
+  const optsRef = useRef({
+    liveStats: init.liveStats,
+    sound: init.sound,
+    smoothCaret: init.smoothCaret,
+  })
 
   const profileRef = useRef(loadProfile())
   const accountRef = useRef(false)
+  const settingsRef = useRef(false)
 
   const langs = langsRef.current
   const length = lengthRef.current
   const focused = focusedRef.current
+  const opts = optsRef.current
   const profile = profileRef.current
   const accountOpen = accountRef.current
+  const settingsOpen = settingsRef.current
+
+  // persist the current filters + preferences.
+  function persist() {
+    saveSettings({
+      languages: [...langsRef.current],
+      length: lengthRef.current,
+      ...optsRef.current,
+    })
+  }
 
   function openAccount() {
     accountRef.current = true
@@ -114,6 +140,22 @@ export default function App() {
 
   function closeAccount() {
     accountRef.current = false
+    force()
+  }
+
+  function openSettings() {
+    settingsRef.current = true
+    force()
+  }
+
+  function closeSettings() {
+    settingsRef.current = false
+    force()
+  }
+
+  function toggleOpt(key) {
+    optsRef.current = { ...optsRef.current, [key]: !optsRef.current[key] }
+    persist()
     force()
   }
 
@@ -148,12 +190,14 @@ export default function App() {
   function setLangs(updater) {
     langsRef.current = updater(langsRef.current)
     ensureInPool()
+    persist()
     force()
   }
 
   function setLength(value) {
     lengthRef.current = value
     ensureInPool()
+    persist()
     force()
   }
 
@@ -177,6 +221,36 @@ export default function App() {
     }
   }
 
+  // soft keypress click via WebAudio, created lazily on first use.
+  const audioRef = useRef(null)
+  function playTick(good) {
+    if (!optsRef.current.sound) return
+    try {
+      let ctx = audioRef.current
+      if (!ctx) {
+        const Ctx = window.AudioContext || window.webkitAudioContext
+        if (!Ctx) return
+        ctx = new Ctx()
+        audioRef.current = ctx
+      }
+      if (ctx.state === 'suspended') ctx.resume()
+      const o = ctx.createOscillator()
+      const g = ctx.createGain()
+      o.type = 'sine'
+      o.frequency.value = good ? 620 : 200
+      o.connect(g)
+      g.connect(ctx.destination)
+      const t = ctx.currentTime
+      g.gain.setValueAtTime(0.0001, t)
+      g.gain.exponentialRampToValueAtTime(good ? 0.05 : 0.07, t + 0.004)
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.06)
+      o.start(t)
+      o.stop(t + 0.07)
+    } catch {
+      // audio not available - ignore
+    }
+  }
+
   // live timer: re-render several times a second and sample wpm once per second.
   useEffect(() => {
     const id = setInterval(() => {
@@ -197,13 +271,29 @@ export default function App() {
   // keep a fresh handler in a ref so the single window listener never goes stale.
   const handlerRef = useRef(null)
   handlerRef.current = function handleKey(e) {
-    if (e.ctrlKey || e.metaKey || e.altKey) return
-    // when the account panel is open, only escape does anything (typing still
-    // reaches the username input because we don't preventDefault other keys)
-    if (accountRef.current) {
+    // ctrl/alt/cmd + backspace deletes the previous word; other modifier combos
+    // are left to the browser.
+    if (e.ctrlKey || e.metaKey || e.altKey) {
+      if (e.key === 'Backspace' && !accountRef.current && !settingsRef.current) {
+        const tag = e.target && e.target.tagName
+        if (tag !== 'INPUT' && tag !== 'TEXTAREA') {
+          const eng = engineRef.current
+          if (!eng.finished) {
+            e.preventDefault()
+            deleteWord(eng)
+            force()
+          }
+        }
+      }
+      return
+    }
+    // when a modal is open, only escape does anything (typing still reaches the
+    // username input because we don't preventDefault other keys)
+    if (accountRef.current || settingsRef.current) {
       if (e.key === 'Escape') {
         e.preventDefault()
         closeAccount()
+        closeSettings()
       }
       return
     }
@@ -259,9 +349,11 @@ export default function App() {
       if (isEnter) {
         eng.statuses[eng.pos] = 'correct'
         eng.correctKeys++
+        playTick(true)
         advance(eng)
       } else {
         eng.errors++
+        playTick(false)
       }
       force()
       return
@@ -272,15 +364,18 @@ export default function App() {
     if (isEnter) {
       // a newline where a character is expected: an error, don't advance
       eng.errors++
+      playTick(false)
       force()
       return
     }
     if (e.key === step.ch) {
       eng.statuses[eng.pos] = 'correct'
       eng.correctKeys++
+      playTick(true)
     } else {
       eng.statuses[eng.pos] = 'incorrect'
       eng.errors++
+      playTick(false)
     }
     advance(eng)
     force()
@@ -303,12 +398,15 @@ export default function App() {
   const eng = engineRef.current
   const snippet = snippetRef.current
 
-  // glide the caret to the current character after every render.
+  // glide the caret to the current character, and keep the active line visible
+  // in the scrollable editor body for long snippets.
   const caretRef = useRef(null)
   const currentCharRef = useRef(null)
+  const bodyRef = useRef(null)
   useLayoutEffect(() => {
     const caret = caretRef.current
     if (!caret) return
+    caret.style.transitionDuration = optsRef.current.smoothCaret ? '' : '0s'
     const cur = currentCharRef.current
     if (eng.finished || !cur) {
       caret.style.opacity = '0'
@@ -318,20 +416,37 @@ export default function App() {
     caret.style.left = `${cur.offsetLeft}px`
     caret.style.top = `${cur.offsetTop}px`
     caret.style.height = `${cur.offsetHeight}px`
+
+    const body = bodyRef.current
+    if (body && body.scrollHeight > body.clientHeight + 1) {
+      const cr = cur.getBoundingClientRect()
+      const br = body.getBoundingClientRect()
+      const pad = cr.height * 1.5
+      if (cr.top < br.top + pad) body.scrollTop -= br.top + pad - cr.top
+      else if (cr.bottom > br.bottom - pad)
+        body.scrollTop += cr.bottom - (br.bottom - pad)
+    }
   })
 
-  // save each finished test to the local profile exactly once.
+  // save each finished test to the local profile exactly once, flagging any new
+  // personal bests captured against the pre-record profile.
   useEffect(() => {
     const e = engineRef.current
     if (!e.finished || e.recorded) return
     e.recorded = true
     const elapsed = e.endTime - e.startTime
     const correct = e.statuses.filter((s) => s === 'correct').length
-    profileRef.current = recordResult(profileRef.current, {
-      wpm: computeWpm(correct, elapsed),
-      acc: computeAccuracy(e.correctKeys, e.total),
+    const w = computeWpm(correct, elapsed)
+    const a = computeAccuracy(e.correctKeys, e.total)
+    const lang = snippetRef.current.language
+    const prev = profileRef.current
+    e.newBest = w > 0 && w > prev.bestWpm
+    e.newLangBest = w > 0 && !e.newBest && w > (prev.bestByLang[lang] || 0)
+    profileRef.current = recordResult(prev, {
+      wpm: w,
+      acc: a,
       timeMs: elapsed,
-      language: snippetRef.current.language,
+      language: lang,
     })
     force()
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -351,6 +466,7 @@ export default function App() {
   const filename = filenameFor(snippet)
   const lineCount = eng.steps.filter((s) => s.type === 'newline').length + 1
   const avg = averages(profile)
+  const langPB = profile.bestByLang[snippet.language] || 0
 
   return (
     <div className="app">
@@ -358,10 +474,15 @@ export default function App() {
         <div className="logo">
           caret<span className="logo-caret" />
         </div>
-        <button className="account-btn" onClick={openAccount}>
-          <span className="account-dot" />
-          {profile.username || 'guest'}
-        </button>
+        <div className="topbar-actions">
+          <button className="icon-btn" onClick={openSettings} title="settings" aria-label="settings">
+            <GearIcon />
+          </button>
+          <button className="account-btn" onClick={openAccount}>
+            <span className="account-dot" />
+            {profile.username || 'guest'}
+          </button>
+        </div>
       </header>
 
       <div className="config">
@@ -400,23 +521,33 @@ export default function App() {
         </div>
       </div>
 
-      <div className="stats">
-        <div className="stat">
-          <span className="stat-value">{wpm}</span>
-          <span className="stat-label">wpm</span>
+      {opts.liveStats && (
+        <div className="stats">
+          <div className="stat">
+            <span className="stat-value">{wpm}</span>
+            <span className="stat-label">wpm</span>
+          </div>
+          <div className="stat">
+            <span className="stat-value">{acc}%</span>
+            <span className="stat-label">acc</span>
+          </div>
+          <div className="stat">
+            <span className="stat-value">{(elapsedMs / 1000).toFixed(1)}s</span>
+            <span className="stat-label">time</span>
+          </div>
+          <div className="progressbar">
+            <div className="progressfill" style={{ width: `${progress}%` }} />
+          </div>
         </div>
-        <div className="stat">
-          <span className="stat-value">{acc}%</span>
-          <span className="stat-label">acc</span>
+      )}
+
+      {!opts.liveStats && (
+        <div className="stats minimal">
+          <div className="progressbar">
+            <div className="progressfill" style={{ width: `${progress}%` }} />
+          </div>
         </div>
-        <div className="stat">
-          <span className="stat-value">{(elapsedMs / 1000).toFixed(1)}s</span>
-          <span className="stat-label">time</span>
-        </div>
-        <div className="progressbar">
-          <div className="progressfill" style={{ width: `${progress}%` }} />
-        </div>
-      </div>
+      )}
 
       <div className="editor" onClick={() => setFocused(true)}>
         <div className="editor-bar">
@@ -426,12 +557,13 @@ export default function App() {
             <span className="dot green" />
           </div>
           <span className="filename">{filename}</span>
+          {langPB > 0 && <span className="pb" title="your best wpm in this language">pb {langPB}</span>}
           <span className={`lang-tag ${snippet.language}`}>
             {LANG_LABELS[snippet.language]}
           </span>
         </div>
 
-        <div className="editor-body">
+        <div className="editor-body" ref={bodyRef}>
           <div className="gutter" aria-hidden="true">
             {Array.from({ length: lineCount }, (_, i) => (
               <span key={i}>{i + 1}</span>
@@ -457,6 +589,13 @@ export default function App() {
 
         {eng.finished && (
           <div className="results">
+            {(eng.newBest || eng.newLangBest) && (
+              <div className="best-badge">
+                {eng.newBest
+                  ? 'new personal best'
+                  : `new best in ${LANG_LABELS[snippet.language]}`}
+              </div>
+            )}
             <div className="results-top">
               <div className="results-headline">
                 <div className="result big">
@@ -487,6 +626,10 @@ export default function App() {
                 <span className="result-value">{eng.errors}</span>
                 <span className="result-label">errors</span>
               </div>
+              <div className="result">
+                <span className="result-value">{avg.wpm || '-'}</span>
+                <span className="result-label">your avg</span>
+              </div>
             </div>
             <div className="results-actions">
               <button className="btn primary" onClick={goNext}>
@@ -503,8 +646,42 @@ export default function App() {
       <footer className="hints">
         <span><kbd>tab</kbd> restart</span>
         <span><kbd>enter</kbd> new line{eng.finished ? ' / next' : ''}</span>
+        <span><kbd>ctrl</kbd>+<kbd>backspace</kbd> delete word</span>
         <span>indentation is auto filled</span>
       </footer>
+
+      {settingsOpen && (
+        <div className="modal-backdrop" onClick={closeSettings}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-head">
+              <span className="modal-title">settings</span>
+              <button className="modal-close" onClick={closeSettings}>
+                esc
+              </button>
+            </div>
+            <div className="toggles">
+              <Toggle
+                label="live stats while typing"
+                hint="hide wpm and time to reduce pressure"
+                value={opts.liveStats}
+                onChange={() => toggleOpt('liveStats')}
+              />
+              <Toggle
+                label="keypress sound"
+                hint="soft click on each key"
+                value={opts.sound}
+                onChange={() => toggleOpt('sound')}
+              />
+              <Toggle
+                label="smooth caret"
+                hint="glide the caret instead of jumping"
+                value={opts.smoothCaret}
+                onChange={() => toggleOpt('smoothCaret')}
+              />
+            </div>
+          </div>
+        </div>
+      )}
 
       {accountOpen && (
         <div className="modal-backdrop" onClick={closeAccount}>
@@ -584,6 +761,34 @@ export default function App() {
   )
 }
 
+function Toggle({ label, hint, value, onChange }) {
+  return (
+    <button className={`toggle ${value ? 'on' : ''}`} onClick={onChange}>
+      <span className="toggle-text">
+        <span className="toggle-label">{label}</span>
+        {hint && <span className="toggle-hint">{hint}</span>}
+      </span>
+      <span className="toggle-track">
+        <span className="toggle-knob" />
+      </span>
+    </button>
+  )
+}
+
+function GearIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <circle cx="12" cy="12" r="3" stroke="currentColor" strokeWidth="1.6" />
+      <path
+        d="M12 2.5v2.2M12 19.3v2.2M4.2 4.2l1.55 1.55M18.25 18.25l1.55 1.55M2.5 12h2.2M19.3 12h2.2M4.2 19.8l1.55-1.55M18.25 5.75l1.55-1.55"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+      />
+    </svg>
+  )
+}
+
 // small svg line chart of wpm and raw over time, monkeytype style.
 function Chart({ samples }) {
   const W = 620
@@ -646,6 +851,35 @@ function advance(eng) {
     eng.finished = true
     eng.endTime = Date.now()
     sample(eng, eng.endTime - eng.startTime) // final point on the graph
+  }
+}
+
+// delete back to the start of the previous run of word/non-word characters,
+// clearing statuses as it goes. mirrors a terminal ctrl+backspace.
+function deleteWord(eng) {
+  let p = prevTypable(eng.steps, eng.pos)
+  if (p < 0) return
+  const isWord = (ch) => /[A-Za-z0-9_]/.test(ch)
+  // skip any whitespace/newlines immediately behind the cursor first.
+  while (p >= 0) {
+    const step = eng.steps[p]
+    const ws = step.type === 'newline' || step.ch === ' '
+    if (!ws) break
+    eng.statuses[p] = 'pending'
+    eng.pos = p
+    p = prevTypable(eng.steps, p)
+  }
+  // then remove the contiguous word (or symbol run) that precedes it.
+  if (p >= 0) {
+    const word = isWord(eng.steps[p].ch)
+    while (p >= 0) {
+      const step = eng.steps[p]
+      if (step.type === 'newline' || step.ch === ' ') break
+      if (isWord(step.ch) !== word) break
+      eng.statuses[p] = 'pending'
+      eng.pos = p
+      p = prevTypable(eng.steps, p)
+    }
   }
 }
 

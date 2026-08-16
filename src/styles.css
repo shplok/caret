@@ -50,6 +50,31 @@ body {
   gap: 16px;
 }
 
+.topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.icon-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--sub-bright);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 7px;
+  cursor: pointer;
+  transition: color 0.12s, border-color 0.12s, transform 0.25s ease;
+}
+
+.icon-btn:hover {
+  color: var(--text);
+  border-color: var(--sub);
+  transform: rotate(35deg);
+}
+
 .account-btn {
   display: flex;
   align-items: center;
@@ -172,6 +197,10 @@ body {
   color: var(--sub);
 }
 
+.stats.minimal {
+  min-height: 6px;
+}
+
 .progressbar {
   flex: 1;
   height: 6px;
@@ -229,6 +258,19 @@ body {
   color: var(--sub-bright);
 }
 
+.pb {
+  margin-left: auto;
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.5px;
+  color: var(--accent);
+  opacity: 0.85;
+}
+
+.pb + .lang-tag {
+  margin-left: 12px;
+}
+
 .lang-tag {
   margin-left: auto;
   font-family: var(--mono);
@@ -247,7 +289,9 @@ body {
   align-items: stretch;
   padding: 18px 20px 22px;
   gap: 18px;
-  overflow-x: auto;
+  overflow: auto;
+  max-height: 56vh;
+  scroll-behavior: smooth;
 }
 
 .gutter {
@@ -348,6 +392,18 @@ body {
   from {
     opacity: 0;
   }
+}
+
+.best-badge {
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  padding: 5px 14px;
+  opacity: 0.9;
 }
 
 .results-top {
@@ -647,4 +703,88 @@ kbd {
   font-family: var(--mono);
   font-size: 12px;
   color: var(--sub-bright);
+}
+
+/* settings toggles */
+.toggles {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: none;
+  border-radius: 10px;
+  padding: 12px 12px;
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+
+.toggle:hover {
+  background: var(--surface-2);
+}
+
+.toggle-text {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.toggle-label {
+  font-family: var(--ui);
+  font-size: 14px;
+  color: var(--text);
+}
+
+.toggle-hint {
+  font-size: 12px;
+  color: var(--sub);
+}
+
+.toggle-track {
+  position: relative;
+  flex: none;
+  width: 40px;
+  height: 22px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.toggle-knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--sub);
+  transition: left 0.15s ease, background 0.15s ease;
+}
+
+.toggle.on .toggle-track {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.toggle.on .toggle-knob {
+  left: 20px;
+  background: var(--bg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
 }
