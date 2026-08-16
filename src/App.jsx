@@ -11,6 +11,26 @@ import {
 
 const LENGTHS = ['all', 'short', 'medium', 'long']
 
+// file extensions used for the editor title bar.
+const EXT = {
+  python: 'py',
+  javascript: 'js',
+  typescript: 'ts',
+  c: 'c',
+  cpp: 'cpp',
+  java: 'java',
+  rust: 'rs',
+  assembly: 'asm',
+}
+
+function filenameFor(snippet) {
+  const slug = snippet.title
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_|_$/g, '')
+  return `${slug}.${EXT[snippet.language]}`
+}
+
 function lengthOf(code) {
   const n = code.split('\n').length
   if (n <= 3) return 'short'
@@ -33,7 +53,19 @@ function makeEngine(snippet) {
     total: 0, // every keystroke counted (for accuracy)
     correctKeys: 0,
     errors: 0,
+    samples: [], // per-second { t, wpm, raw } for the results graph
+    lastSec: 0,
   }
+}
+
+// take a wpm/raw snapshot for the given elapsed time (used once per second).
+function sample(eng, elapsedMs) {
+  const minutes = elapsedMs / 60000
+  if (minutes <= 0) return
+  const correct = eng.statuses.filter((s) => s === 'correct').length
+  const wpm = Math.round(correct / 5 / minutes)
+  const raw = Math.round(eng.total / 5 / minutes)
+  eng.samples.push({ t: Math.round(elapsedMs / 1000), wpm, raw })
 }
 
 function pick(pool, excludeId) {
@@ -121,12 +153,20 @@ export default function App() {
     }
   }
 
-  // live timer: re-render a few times a second while typing.
+  // live timer: re-render several times a second and sample wpm once per second.
   useEffect(() => {
     const id = setInterval(() => {
       const eng = engineRef.current
-      if (eng.started && !eng.finished) force()
-    }, 200)
+      if (eng.started && !eng.finished) {
+        const elapsed = Date.now() - eng.startTime
+        const sec = Math.floor(elapsed / 1000)
+        if (sec > eng.lastSec) {
+          eng.lastSec = sec
+          sample(eng, elapsed)
+        }
+        force()
+      }
+    }, 100)
     return () => clearInterval(id)
   }, [])
 
@@ -253,13 +293,19 @@ export default function App() {
   const done = eng.statuses.filter((s) => s === 'correct' || s === 'incorrect').length
   const totalTypable = typableCount(eng.steps)
   const progress = totalTypable ? Math.round((done / totalTypable) * 100) : 0
+  const rawWpm = elapsedMs > 0 ? Math.round(eng.total / 5 / (elapsedMs / 60000)) : 0
+
+  const filename = filenameFor(snippet)
+  const lineCount = eng.steps.filter((s) => s.type === 'newline').length + 1
 
   return (
     <div className="app">
       <header className="topbar">
         <div className="logo">
-          <span className="logo-mark">&gt;_</span> codetype
+          <span className="logo-mark">{'{ }'}</span>
+          <span className="logo-text">type<span className="logo-accent">def</span></span>
         </div>
+        <div className="tagline">type code, not sentences</div>
       </header>
 
       <div className="config">
@@ -310,28 +356,40 @@ export default function App() {
         <div className="progressbar">
           <div className="progressfill" style={{ width: `${progress}%` }} />
         </div>
-        <div className="meta">
-          <span className={`badge ${snippet.language}`}>{LANG_LABELS[snippet.language]}</span>
-          <span className="title">{snippet.title}</span>
-        </div>
       </div>
 
-      <div
-        className="code-wrap"
-        onClick={() => setFocused(true)}
-      >
-        <pre className={`code ${focused ? '' : 'blurred'}`}>
-          <span ref={caretRef} className="caret" />
-          {eng.steps.map((step, i) => (
-            <span
-              key={i}
-              ref={i === eng.pos ? currentCharRef : null}
-              className={classFor(step, eng.statuses[i])}
-            >
-              {step.ch}
-            </span>
-          ))}
-        </pre>
+      <div className="editor" onClick={() => setFocused(true)}>
+        <div className="editor-bar">
+          <div className="dots">
+            <span className="dot red" />
+            <span className="dot yellow" />
+            <span className="dot green" />
+          </div>
+          <span className="filename">{filename}</span>
+          <span className={`lang-tag ${snippet.language}`}>
+            {LANG_LABELS[snippet.language]}
+          </span>
+        </div>
+
+        <div className="editor-body">
+          <div className="gutter" aria-hidden="true">
+            {Array.from({ length: lineCount }, (_, i) => (
+              <span key={i}>{i + 1}</span>
+            ))}
+          </div>
+          <pre className={`code ${focused ? '' : 'blurred'}`}>
+            <span ref={caretRef} className="caret" />
+            {eng.steps.map((step, i) => (
+              <span
+                key={i}
+                ref={i === eng.pos ? currentCharRef : null}
+                className={classFor(step, eng.statuses[i])}
+              >
+                {step.ch}
+              </span>
+            ))}
+          </pre>
+        </div>
 
         {!focused && !eng.finished && (
           <div className="focus-note">click or press any key to focus</div>
@@ -339,14 +397,23 @@ export default function App() {
 
         {eng.finished && (
           <div className="results">
-            <div className="results-grid">
-              <div className="result big">
-                <span className="result-value">{wpm}</span>
-                <span className="result-label">wpm</span>
+            <div className="results-top">
+              <div className="results-headline">
+                <div className="result big">
+                  <span className="result-value">{wpm}</span>
+                  <span className="result-label">wpm</span>
+                </div>
+                <div className="result big">
+                  <span className="result-value">{acc}%</span>
+                  <span className="result-label">accuracy</span>
+                </div>
               </div>
-              <div className="result big">
-                <span className="result-value">{acc}%</span>
-                <span className="result-label">accuracy</span>
+              <Chart samples={eng.samples} />
+            </div>
+            <div className="results-grid">
+              <div className="result">
+                <span className="result-value">{rawWpm}</span>
+                <span className="result-label">raw</span>
               </div>
               <div className="result">
                 <span className="result-value">{(elapsedMs / 1000).toFixed(1)}s</span>
@@ -382,12 +449,68 @@ export default function App() {
   )
 }
 
+// small svg line chart of wpm and raw over time, monkeytype style.
+function Chart({ samples }) {
+  const W = 620
+  const H = 190
+  const padL = 34
+  const padR = 12
+  const padT = 14
+  const padB = 24
+
+  if (!samples || samples.length === 0) {
+    return <div className="chart empty">not enough data</div>
+  }
+
+  const maxT = Math.max(1, ...samples.map((s) => s.t))
+  const maxY = Math.max(10, ...samples.map((s) => Math.max(s.wpm, s.raw)))
+
+  const x = (t) => padL + (maxT ? (t / maxT) * (W - padL - padR) : 0)
+  const y = (v) => padT + (1 - v / maxY) * (H - padT - padB)
+
+  const line = (key) =>
+    samples.map((s, i) => `${i === 0 ? 'M' : 'L'} ${x(s.t)} ${y(s[key])}`).join(' ')
+
+  const ticks = [0, Math.round(maxY / 2), maxY]
+
+  return (
+    <svg className="chart" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none">
+      {ticks.map((val) => (
+        <g key={val}>
+          <line
+            className="grid"
+            x1={padL}
+            x2={W - padR}
+            y1={y(val)}
+            y2={y(val)}
+          />
+          <text className="axis" x={padL - 6} y={y(val) + 4} textAnchor="end">
+            {val}
+          </text>
+        </g>
+      ))}
+      <text className="axis" x={padL} y={H - 6} textAnchor="start">
+        0s
+      </text>
+      <text className="axis" x={W - padR} y={H - 6} textAnchor="end">
+        {maxT}s
+      </text>
+      <path className="raw-line" d={line('raw')} />
+      <path className="wpm-line" d={line('wpm')} />
+      {samples.map((s, i) => (
+        <circle key={i} className="wpm-dot" cx={x(s.t)} cy={y(s.wpm)} r="2.5" />
+      ))}
+    </svg>
+  )
+}
+
 function advance(eng) {
   const next = nextTypable(eng.steps, eng.pos + 1)
   eng.pos = next
   if (next >= eng.steps.length) {
     eng.finished = true
     eng.endTime = Date.now()
+    sample(eng, eng.endTime - eng.startTime) // final point on the graph
   }
 }
 
