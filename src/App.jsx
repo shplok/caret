@@ -316,6 +316,10 @@ export default function App() {
                 setLangs((prev) => toggle(prev, lang))
                 e.currentTarget.blur()
               }}
+              onDoubleClick={(e) => {
+                setLangs(() => new Set([lang])) // solo this language
+                e.currentTarget.blur()
+              }}
             >
               {LANG_LABELS[lang]}
             </button>

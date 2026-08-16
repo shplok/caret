@@ -111,12 +111,10 @@ body {
 
 .opt:hover {
   color: var(--text);
-  background: var(--surface-2);
 }
 
 .opt.on {
-  color: var(--bg);
-  background: var(--accent);
+  color: var(--accent);
   font-weight: 700;
 }
 
