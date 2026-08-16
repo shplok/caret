@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useReducer, useRef } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useReducer, useRef } from 'react'
 import { LANGUAGES, snippets } from './snippets.js'
 import {
   buildSteps,
@@ -8,6 +8,15 @@ import {
   computeWpm,
   computeAccuracy,
 } from './typing.js'
+
+const LENGTHS = ['all', 'short', 'medium', 'long']
+
+function lengthOf(code) {
+  const n = code.split('\n').length
+  if (n <= 3) return 'short'
+  if (n <= 6) return 'medium'
+  return 'long'
+}
 
 // build a fresh engine state for a snippet.
 function makeEngine(snippet) {
@@ -43,12 +52,24 @@ function classFor(step, status) {
 export default function App() {
   const [, force] = useReducer((c) => c + 1, 0)
 
-  const [langs, setLangs] = useReducerLike(new Set(LANGUAGES))
+  // filter state kept in refs so the single key handler always reads fresh values.
+  const langsRef = useRef(new Set(LANGUAGES))
+  const lengthRef = useRef('all')
+  const focusedRef = useRef(true)
 
-  const pool = useMemo(
-    () => snippets.filter((s) => langs.has(s.language)),
-    [langs],
-  )
+  const langs = langsRef.current
+  const length = lengthRef.current
+  const focused = focusedRef.current
+
+  const pool = useMemo(() => {
+    let p = snippets.filter((s) => langs.has(s.language))
+    if (length !== 'all') {
+      const f = p.filter((s) => lengthOf(s.code) === length)
+      if (f.length) p = f // fall back to the wider set rather than showing nothing
+    }
+    return p
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [langs, length])
 
   const snippetRef = useRef(pick(pool))
   const engineRef = useRef(makeEngine(snippetRef.current))
@@ -68,13 +89,37 @@ export default function App() {
     loadSnippet(pick(pool, snippetRef.current.id))
   }
 
-  // if the language filter no longer includes the current snippet, swap it out.
-  useEffect(() => {
-    if (!langs.has(snippetRef.current.language)) {
-      loadSnippet(pick(pool))
+  function setLangs(updater) {
+    langsRef.current = updater(langsRef.current)
+    ensureInPool()
+    force()
+  }
+
+  function setLength(value) {
+    lengthRef.current = value
+    ensureInPool()
+    force()
+  }
+
+  // after a filter change, swap the snippet if it no longer matches.
+  function ensureInPool() {
+    let p = snippets.filter((s) => langsRef.current.has(s.language))
+    if (lengthRef.current !== 'all') {
+      const f = p.filter((s) => lengthOf(s.code) === lengthRef.current)
+      if (f.length) p = f
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [langs])
+    if (!p.some((s) => s.id === snippetRef.current.id)) {
+      snippetRef.current = pick(p)
+      engineRef.current = makeEngine(snippetRef.current)
+    }
+  }
+
+  function setFocused(v) {
+    if (focusedRef.current !== v) {
+      focusedRef.current = v
+      force()
+    }
+  }
 
   // live timer: re-render a few times a second while typing.
   useEffect(() => {
@@ -89,6 +134,7 @@ export default function App() {
   const handlerRef = useRef(null)
   handlerRef.current = function handleKey(e) {
     if (e.ctrlKey || e.metaKey || e.altKey) return
+    setFocused(true)
     if (e.key === ' ') e.preventDefault() // stop page scroll on space
 
     if (e.key === 'Tab') {
@@ -165,13 +211,38 @@ export default function App() {
   }
 
   useEffect(() => {
-    const fn = (e) => handlerRef.current(e)
-    window.addEventListener('keydown', fn)
-    return () => window.removeEventListener('keydown', fn)
+    const onKey = (e) => handlerRef.current(e)
+    const onBlur = () => setFocused(false)
+    const onFocus = () => setFocused(true)
+    window.addEventListener('keydown', onKey)
+    window.addEventListener('blur', onBlur)
+    window.addEventListener('focus', onFocus)
+    return () => {
+      window.removeEventListener('keydown', onKey)
+      window.removeEventListener('blur', onBlur)
+      window.removeEventListener('focus', onFocus)
+    }
   }, [])
 
   const eng = engineRef.current
   const snippet = snippetRef.current
+
+  // glide the caret to the current character after every render.
+  const caretRef = useRef(null)
+  const currentCharRef = useRef(null)
+  useLayoutEffect(() => {
+    const caret = caretRef.current
+    if (!caret) return
+    const cur = currentCharRef.current
+    if (eng.finished || !cur) {
+      caret.style.opacity = '0'
+      return
+    }
+    caret.style.opacity = '1'
+    caret.style.left = `${cur.offsetLeft}px`
+    caret.style.top = `${cur.offsetTop}px`
+    caret.style.height = `${cur.offsetHeight}px`
+  })
 
   const correctChars = eng.statuses.filter((s) => s === 'correct').length
   const elapsedMs = eng.started
@@ -183,32 +254,22 @@ export default function App() {
   const totalTypable = typableCount(eng.steps)
   const progress = totalTypable ? Math.round((done / totalTypable) * 100) : 0
 
-  // build the rendered code with an inline caret.
-  const rendered = []
-  eng.steps.forEach((step, i) => {
-    if (i === eng.pos && !eng.finished) {
-      rendered.push(<span key={`caret-${i}`} className="caret" />)
-    }
-    rendered.push(
-      <span key={i} className={classFor(step, eng.statuses[i])}>
-        {step.ch}
-      </span>,
-    )
-  })
-
   return (
     <div className="app">
       <header className="topbar">
         <div className="logo">
           <span className="logo-mark">&gt;_</span> codetype
         </div>
-        <div className="chips">
+      </header>
+
+      <div className="config">
+        <div className="config-group">
           {LANGUAGES.map((lang) => (
             <button
               key={lang}
-              className={`chip ${langs.has(lang) ? 'on' : ''}`}
+              className={`opt ${langs.has(lang) ? 'on' : ''}`}
               onClick={(e) => {
-                toggleLang(setLangs, lang)
+                setLangs((prev) => toggle(prev, lang))
                 e.currentTarget.blur()
               }}
             >
@@ -216,11 +277,21 @@ export default function App() {
             </button>
           ))}
         </div>
-      </header>
-
-      <div className="meta">
-        <span className={`badge ${snippet.language}`}>{snippet.language}</span>
-        <span className="title">{snippet.title}</span>
+        <div className="config-divider" />
+        <div className="config-group">
+          {LENGTHS.map((len) => (
+            <button
+              key={len}
+              className={`opt ${length === len ? 'on' : ''}`}
+              onClick={(e) => {
+                setLength(len)
+                e.currentTarget.blur()
+              }}
+            >
+              {len}
+            </button>
+          ))}
+        </div>
       </div>
 
       <div className="stats">
@@ -239,10 +310,32 @@ export default function App() {
         <div className="progressbar">
           <div className="progressfill" style={{ width: `${progress}%` }} />
         </div>
+        <div className="meta">
+          <span className={`badge ${snippet.language}`}>{snippet.language}</span>
+          <span className="title">{snippet.title}</span>
+        </div>
       </div>
 
-      <div className="code-wrap">
-        <pre className="code">{rendered}</pre>
+      <div
+        className="code-wrap"
+        onClick={() => setFocused(true)}
+      >
+        <pre className={`code ${focused ? '' : 'blurred'}`}>
+          <span ref={caretRef} className="caret" />
+          {eng.steps.map((step, i) => (
+            <span
+              key={i}
+              ref={i === eng.pos ? currentCharRef : null}
+              className={classFor(step, eng.statuses[i])}
+            >
+              {step.ch}
+            </span>
+          ))}
+        </pre>
+
+        {!focused && !eng.finished && (
+          <div className="focus-note">click or press any key to focus</div>
+        )}
 
         {eng.finished && (
           <div className="results">
@@ -298,25 +391,12 @@ function advance(eng) {
   }
 }
 
-// tiny helper so langs behaves like state but stays a Set.
-function useReducerLike(initial) {
-  const [, force] = useReducer((c) => c + 1, 0)
-  const ref = useRef(initial)
-  const set = (updater) => {
-    ref.current = typeof updater === 'function' ? updater(ref.current) : updater
-    force()
+function toggle(prev, lang) {
+  const next = new Set(prev)
+  if (next.has(lang)) {
+    if (next.size > 1) next.delete(lang)
+  } else {
+    next.add(lang)
   }
-  return [ref.current, set]
-}
-
-function toggleLang(setLangs, lang) {
-  setLangs((prev) => {
-    const next = new Set(prev)
-    if (next.has(lang)) {
-      if (next.size > 1) next.delete(lang)
-    } else {
-      next.add(lang)
-    }
-    return next
-  })
+  return next
 }
