@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useReducer, useRef } from 'react'
-import { LANGUAGES, snippets } from './snippets.js'
+import { LANGUAGES, LANG_LABELS, snippets } from './snippets.js'
 import {
   buildSteps,
   nextTypable,
@@ -273,7 +273,7 @@ export default function App() {
                 e.currentTarget.blur()
               }}
             >
-              {lang}
+              {LANG_LABELS[lang]}
             </button>
           ))}
         </div>
@@ -311,7 +311,7 @@ export default function App() {
           <div className="progressfill" style={{ width: `${progress}%` }} />
         </div>
         <div className="meta">
-          <span className={`badge ${snippet.language}`}>{snippet.language}</span>
+          <span className={`badge ${snippet.language}`}>{LANG_LABELS[snippet.language]}</span>
           <span className="title">{snippet.title}</span>
         </div>
       </div>
