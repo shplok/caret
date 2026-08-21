@@ -15,7 +15,9 @@ import {
   resetStats,
   averages,
   formatDuration,
+  formatAgo,
 } from './profile.js'
+import { loadSettings, saveSettings } from './settings.js'
 
 const LENGTHS = ['all', 'short', 'medium', 'long']
 
@@ -64,6 +66,8 @@ function makeEngine(snippet) {
     samples: [], // per-second { t, wpm, raw } for the results graph
     lastSec: 0,
     recorded: false, // whether this finished test was saved to the profile
+    newBest: false, // beat the all-time best wpm
+    newLangBest: false, // beat the best wpm for this language
   }
 }
 
@@ -83,6 +87,15 @@ function pick(pool, excludeId) {
   return choices[i]
 }
 
+function shuffle(arr) {
+  const a = [...arr]
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1))
+    ;[a[i], a[j]] = [a[j], a[i]]
+  }
+  return a
+}
+
 function classFor(step, status) {
   if (step.type === 'newline') return `ch newline ${status}`
   let c = `ch ${status}`
@@ -93,19 +106,46 @@ function classFor(step, status) {
 export default function App() {
   const [, force] = useReducer((c) => c + 1, 0)
 
-  // filter state kept in refs so the single key handler always reads fresh values.
-  const langsRef = useRef(new Set(LANGUAGES))
-  const lengthRef = useRef('all')
+  // load persisted settings once.
+  const initRef = useRef(null)
+  if (initRef.current === null) initRef.current = loadSettings()
+  const init = initRef.current
+
+  // filter/preference state kept in refs so the single key handler always reads
+  // fresh values without re-subscribing the window listener.
+  const langsRef = useRef(new Set(init.languages))
+  const lengthRef = useRef(init.length)
   const focusedRef = useRef(true)
+  const optsRef = useRef({
+    liveStats: init.liveStats,
+    sound: init.sound,
+    smoothCaret: init.smoothCaret,
+    fontSize: init.fontSize,
+  })
+  const deckRef = useRef({ sig: '', ids: [] })
 
   const profileRef = useRef(loadProfile())
   const accountRef = useRef(false)
+  const settingsRef = useRef(false)
+  const capsRef = useRef(false)
 
   const langs = langsRef.current
   const length = lengthRef.current
   const focused = focusedRef.current
+  const opts = optsRef.current
   const profile = profileRef.current
   const accountOpen = accountRef.current
+  const settingsOpen = settingsRef.current
+  const capsLock = capsRef.current
+
+  // persist the current filters + preferences.
+  function persist() {
+    saveSettings({
+      languages: [...langsRef.current],
+      length: lengthRef.current,
+      ...optsRef.current,
+    })
+  }
 
   function openAccount() {
     accountRef.current = true
@@ -114,6 +154,28 @@ export default function App() {
 
   function closeAccount() {
     accountRef.current = false
+    force()
+  }
+
+  function openSettings() {
+    settingsRef.current = true
+    force()
+  }
+
+  function closeSettings() {
+    settingsRef.current = false
+    force()
+  }
+
+  function toggleOpt(key) {
+    optsRef.current = { ...optsRef.current, [key]: !optsRef.current[key] }
+    persist()
+    force()
+  }
+
+  function setOpt(key, value) {
+    optsRef.current = { ...optsRef.current, [key]: value }
+    persist()
     force()
   }
 
@@ -141,19 +203,36 @@ export default function App() {
     force()
   }
 
+  // draw the next snippet from a shuffled deck so every snippet in the current
+  // pool appears once before any repeats.
+  function drawNext(excludeId) {
+    const sig = pool.map((s) => s.id).sort().join(',')
+    let deck = deckRef.current
+    if (deck.sig !== sig || deck.ids.length === 0) {
+      deck = { sig, ids: shuffle(pool.map((s) => s.id)) }
+    }
+    let idx = 0
+    if (deck.ids[0] === excludeId && deck.ids.length > 1) idx = 1
+    const [id] = deck.ids.splice(idx, 1)
+    deckRef.current = deck
+    return pool.find((s) => s.id === id) || pick(pool, excludeId)
+  }
+
   function goNext() {
-    loadSnippet(pick(pool, snippetRef.current.id))
+    loadSnippet(drawNext(snippetRef.current.id))
   }
 
   function setLangs(updater) {
     langsRef.current = updater(langsRef.current)
     ensureInPool()
+    persist()
     force()
   }
 
   function setLength(value) {
     lengthRef.current = value
     ensureInPool()
+    persist()
     force()
   }
 
@@ -177,6 +256,36 @@ export default function App() {
     }
   }
 
+  // soft keypress click via WebAudio, created lazily on first use.
+  const audioRef = useRef(null)
+  function playTick(good) {
+    if (!optsRef.current.sound) return
+    try {
+      let ctx = audioRef.current
+      if (!ctx) {
+        const Ctx = window.AudioContext || window.webkitAudioContext
+        if (!Ctx) return
+        ctx = new Ctx()
+        audioRef.current = ctx
+      }
+      if (ctx.state === 'suspended') ctx.resume()
+      const o = ctx.createOscillator()
+      const g = ctx.createGain()
+      o.type = 'sine'
+      o.frequency.value = good ? 620 : 200
+      o.connect(g)
+      g.connect(ctx.destination)
+      const t = ctx.currentTime
+      g.gain.setValueAtTime(0.0001, t)
+      g.gain.exponentialRampToValueAtTime(good ? 0.05 : 0.07, t + 0.004)
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.06)
+      o.start(t)
+      o.stop(t + 0.07)
+    } catch {
+      // audio not available - ignore
+    }
+  }
+
   // live timer: re-render several times a second and sample wpm once per second.
   useEffect(() => {
     const id = setInterval(() => {
@@ -197,13 +306,37 @@ export default function App() {
   // keep a fresh handler in a ref so the single window listener never goes stale.
   const handlerRef = useRef(null)
   handlerRef.current = function handleKey(e) {
-    if (e.ctrlKey || e.metaKey || e.altKey) return
-    // when the account panel is open, only escape does anything (typing still
-    // reaches the username input because we don't preventDefault other keys)
-    if (accountRef.current) {
+    // track caps lock so we can warn about it (a common cause of all errors).
+    if (typeof e.getModifierState === 'function') {
+      const caps = e.getModifierState('CapsLock')
+      if (caps !== capsRef.current) {
+        capsRef.current = caps
+        force()
+      }
+    }
+    // ctrl/alt/cmd + backspace deletes the previous word; other modifier combos
+    // are left to the browser.
+    if (e.ctrlKey || e.metaKey || e.altKey) {
+      if (e.key === 'Backspace' && !accountRef.current && !settingsRef.current) {
+        const tag = e.target && e.target.tagName
+        if (tag !== 'INPUT' && tag !== 'TEXTAREA') {
+          const eng = engineRef.current
+          if (!eng.finished) {
+            e.preventDefault()
+            deleteWord(eng)
+            force()
+          }
+        }
+      }
+      return
+    }
+    // when a modal is open, only escape does anything (typing still reaches the
+    // username input because we don't preventDefault other keys)
+    if (accountRef.current || settingsRef.current) {
       if (e.key === 'Escape') {
         e.preventDefault()
         closeAccount()
+        closeSettings()
       }
       return
     }
@@ -259,9 +392,11 @@ export default function App() {
       if (isEnter) {
         eng.statuses[eng.pos] = 'correct'
         eng.correctKeys++
+        playTick(true)
         advance(eng)
       } else {
         eng.errors++
+        playTick(false)
       }
       force()
       return
@@ -272,15 +407,18 @@ export default function App() {
     if (isEnter) {
       // a newline where a character is expected: an error, don't advance
       eng.errors++
+      playTick(false)
       force()
       return
     }
     if (e.key === step.ch) {
       eng.statuses[eng.pos] = 'correct'
       eng.correctKeys++
+      playTick(true)
     } else {
       eng.statuses[eng.pos] = 'incorrect'
       eng.errors++
+      playTick(false)
     }
     advance(eng)
     force()
@@ -303,35 +441,67 @@ export default function App() {
   const eng = engineRef.current
   const snippet = snippetRef.current
 
-  // glide the caret to the current character after every render.
+  // glide the caret to the current character, and keep the active line visible
+  // in the scrollable editor body for long snippets.
   const caretRef = useRef(null)
   const currentCharRef = useRef(null)
+  const bodyRef = useRef(null)
+  const lineRef = useRef(null)
   useLayoutEffect(() => {
     const caret = caretRef.current
     if (!caret) return
+    const smooth = optsRef.current.smoothCaret
+    caret.style.transitionDuration = smooth ? '' : '0s'
+    const line = lineRef.current
     const cur = currentCharRef.current
     if (eng.finished || !cur) {
       caret.style.opacity = '0'
+      if (line) line.style.opacity = '0'
       return
     }
     caret.style.opacity = '1'
     caret.style.left = `${cur.offsetLeft}px`
     caret.style.top = `${cur.offsetTop}px`
     caret.style.height = `${cur.offsetHeight}px`
+
+    if (line) {
+      line.style.transitionDuration = smooth ? '' : '0s'
+      line.style.opacity = '1'
+      line.style.top = `${cur.offsetTop}px`
+      line.style.height = `${cur.offsetHeight}px`
+    }
+
+    const body = bodyRef.current
+    if (body && body.scrollHeight > body.clientHeight + 1) {
+      const cr = cur.getBoundingClientRect()
+      const br = body.getBoundingClientRect()
+      const pad = cr.height * 1.5
+      if (cr.top < br.top + pad) body.scrollTop -= br.top + pad - cr.top
+      else if (cr.bottom > br.bottom - pad)
+        body.scrollTop += cr.bottom - (br.bottom - pad)
+    }
   })
 
-  // save each finished test to the local profile exactly once.
+  // save each finished test to the local profile exactly once, flagging any new
+  // personal bests captured against the pre-record profile.
   useEffect(() => {
     const e = engineRef.current
     if (!e.finished || e.recorded) return
     e.recorded = true
     const elapsed = e.endTime - e.startTime
     const correct = e.statuses.filter((s) => s === 'correct').length
-    profileRef.current = recordResult(profileRef.current, {
-      wpm: computeWpm(correct, elapsed),
-      acc: computeAccuracy(e.correctKeys, e.total),
+    const w = computeWpm(correct, elapsed)
+    const a = computeAccuracy(e.correctKeys, e.total)
+    const lang = snippetRef.current.language
+    const prev = profileRef.current
+    e.newBest = w > 0 && w > prev.bestWpm
+    e.newLangBest = w > 0 && !e.newBest && w > (prev.bestByLang[lang] || 0)
+    profileRef.current = recordResult(prev, {
+      wpm: w,
+      acc: a,
       timeMs: elapsed,
-      language: snippetRef.current.language,
+      language: lang,
+      at: Date.now(),
     })
     force()
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -351,6 +521,9 @@ export default function App() {
   const filename = filenameFor(snippet)
   const lineCount = eng.steps.filter((s) => s.type === 'newline').length + 1
   const avg = averages(profile)
+  const langPB = profile.bestByLang[snippet.language] || 0
+  const consistency = computeConsistency(eng.samples)
+  const now = accountOpen ? Date.now() : 0
 
   return (
     <div className="app">
@@ -358,10 +531,15 @@ export default function App() {
         <div className="logo">
           caret<span className="logo-caret" />
         </div>
-        <button className="account-btn" onClick={openAccount}>
-          <span className="account-dot" />
-          {profile.username || 'guest'}
-        </button>
+        <div className="topbar-actions">
+          <button className="icon-btn" onClick={openSettings} title="settings" aria-label="settings">
+            <GearIcon />
+          </button>
+          <button className="account-btn" onClick={openAccount}>
+            <span className="account-dot" />
+            {profile.username || 'guest'}
+          </button>
+        </div>
       </header>
 
       <div className="config">
@@ -400,25 +578,35 @@ export default function App() {
         </div>
       </div>
 
-      <div className="stats">
-        <div className="stat">
-          <span className="stat-value">{wpm}</span>
-          <span className="stat-label">wpm</span>
+      {opts.liveStats && (
+        <div className="stats">
+          <div className="stat">
+            <span className="stat-value">{wpm}</span>
+            <span className="stat-label">wpm</span>
+          </div>
+          <div className="stat">
+            <span className="stat-value">{acc}%</span>
+            <span className="stat-label">acc</span>
+          </div>
+          <div className="stat">
+            <span className="stat-value">{(elapsedMs / 1000).toFixed(1)}s</span>
+            <span className="stat-label">time</span>
+          </div>
+          <div className="progressbar">
+            <div className="progressfill" style={{ width: `${progress}%` }} />
+          </div>
         </div>
-        <div className="stat">
-          <span className="stat-value">{acc}%</span>
-          <span className="stat-label">acc</span>
-        </div>
-        <div className="stat">
-          <span className="stat-value">{(elapsedMs / 1000).toFixed(1)}s</span>
-          <span className="stat-label">time</span>
-        </div>
-        <div className="progressbar">
-          <div className="progressfill" style={{ width: `${progress}%` }} />
-        </div>
-      </div>
+      )}
 
-      <div className="editor" onClick={() => setFocused(true)}>
+      {!opts.liveStats && (
+        <div className="stats minimal">
+          <div className="progressbar">
+            <div className="progressfill" style={{ width: `${progress}%` }} />
+          </div>
+        </div>
+      )}
+
+      <div className={`editor size-${opts.fontSize}`} onClick={() => setFocused(true)}>
         <div className="editor-bar">
           <div className="dots">
             <span className="dot red" />
@@ -426,18 +614,20 @@ export default function App() {
             <span className="dot green" />
           </div>
           <span className="filename">{filename}</span>
+          {langPB > 0 && <span className="pb" title="your best wpm in this language">pb {langPB}</span>}
           <span className={`lang-tag ${snippet.language}`}>
             {LANG_LABELS[snippet.language]}
           </span>
         </div>
 
-        <div className="editor-body">
+        <div className="editor-body" ref={bodyRef}>
           <div className="gutter" aria-hidden="true">
             {Array.from({ length: lineCount }, (_, i) => (
               <span key={i}>{i + 1}</span>
             ))}
           </div>
           <pre className={`code ${focused ? '' : 'blurred'}`}>
+            <span ref={lineRef} className="active-line" />
             <span ref={caretRef} className="caret" />
             {eng.steps.map((step, i) => (
               <span
@@ -451,12 +641,31 @@ export default function App() {
           </pre>
         </div>
 
+        {capsLock && focused && !eng.finished && !accountOpen && !settingsOpen && (
+          <div className="caps-warn">caps lock is on</div>
+        )}
+
         {!focused && !eng.finished && (
           <div className="focus-note">click or press any key to focus</div>
         )}
 
         {eng.finished && (
           <div className="results">
+            <div className="results-chips">
+              {(eng.newBest || eng.newLangBest) && (
+                <div className="best-badge">
+                  {eng.newBest
+                    ? 'new personal best'
+                    : `new best in ${LANG_LABELS[snippet.language]}`}
+                </div>
+              )}
+              {profile.testsCompleted > 1 && avg.wpm > 0 && (
+                <div className={`delta-chip ${wpm >= avg.wpm ? 'up' : 'down'}`}>
+                  {wpm >= avg.wpm ? '+' : ''}
+                  {wpm - avg.wpm} vs avg
+                </div>
+              )}
+            </div>
             <div className="results-top">
               <div className="results-headline">
                 <div className="result big">
@@ -487,6 +696,17 @@ export default function App() {
                 <span className="result-value">{eng.errors}</span>
                 <span className="result-label">errors</span>
               </div>
+              <div className="result">
+                <span className="result-value">{consistency}%</span>
+                <span className="result-label">consistency</span>
+              </div>
+              <div className="result">
+                <span className="result-value">{avg.wpm || '-'}</span>
+                <span className="result-label">your avg</span>
+              </div>
+            </div>
+            <div className="results-caption">
+              {snippet.title} · {LANG_LABELS[snippet.language]}
             </div>
             <div className="results-actions">
               <button className="btn primary" onClick={goNext}>
@@ -503,8 +723,59 @@ export default function App() {
       <footer className="hints">
         <span><kbd>tab</kbd> restart</span>
         <span><kbd>enter</kbd> new line{eng.finished ? ' / next' : ''}</span>
+        <span><kbd>ctrl</kbd>+<kbd>backspace</kbd> delete word</span>
         <span>indentation is auto filled</span>
       </footer>
+
+      {settingsOpen && (
+        <div className="modal-backdrop" onClick={closeSettings}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-head">
+              <span className="modal-title">settings</span>
+              <button className="modal-close" onClick={closeSettings}>
+                esc
+              </button>
+            </div>
+            <div className="toggles">
+              <Toggle
+                label="live stats while typing"
+                hint="hide wpm and time to reduce pressure"
+                value={opts.liveStats}
+                onChange={() => toggleOpt('liveStats')}
+              />
+              <Toggle
+                label="keypress sound"
+                hint="soft click on each key"
+                value={opts.sound}
+                onChange={() => toggleOpt('sound')}
+              />
+              <Toggle
+                label="smooth caret"
+                hint="glide the caret instead of jumping"
+                value={opts.smoothCaret}
+                onChange={() => toggleOpt('smoothCaret')}
+              />
+              <div className="setting-row">
+                <span className="toggle-text">
+                  <span className="toggle-label">font size</span>
+                  <span className="toggle-hint">size of the code you type</span>
+                </span>
+                <div className="seg">
+                  {['s', 'm', 'l'].map((sz) => (
+                    <button
+                      key={sz}
+                      className={`seg-btn ${opts.fontSize === sz ? 'on' : ''}`}
+                      onClick={() => setOpt('fontSize', sz)}
+                    >
+                      {sz}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {accountOpen && (
         <div className="modal-backdrop" onClick={closeAccount}>
@@ -568,6 +839,29 @@ export default function App() {
               </div>
             </div>
 
+            {profile.history && profile.history.length > 0 && (
+              <div className="history">
+                <div className="lang-bests-title">recent tests</div>
+                <HistorySpark history={profile.history} />
+                <div className="history-list">
+                  {profile.history
+                    .slice(-8)
+                    .reverse()
+                    .map((h, i) => (
+                      <div className="history-row" key={i}>
+                        <span className="history-wpm">{h.wpm}</span>
+                        <span className="history-unit">wpm</span>
+                        <span className="history-acc">{h.acc}%</span>
+                        <span className="history-lang">
+                          {LANG_LABELS[h.language] || h.language}
+                        </span>
+                        <span className="history-ago">{formatAgo(h.at, now)}</span>
+                      </div>
+                    ))}
+                </div>
+              </div>
+            )}
+
             <button
               className="btn reset"
               onClick={() => {
@@ -581,6 +875,58 @@ export default function App() {
         </div>
       )}
     </div>
+  )
+}
+
+function Toggle({ label, hint, value, onChange }) {
+  return (
+    <button className={`toggle ${value ? 'on' : ''}`} onClick={onChange}>
+      <span className="toggle-text">
+        <span className="toggle-label">{label}</span>
+        {hint && <span className="toggle-hint">{hint}</span>}
+      </span>
+      <span className="toggle-track">
+        <span className="toggle-knob" />
+      </span>
+    </button>
+  )
+}
+
+// compact wpm-over-time sparkline for the recent history in the account modal.
+function HistorySpark({ history }) {
+  const data = (history || []).slice(-30)
+  if (data.length < 2) return null
+  const W = 400
+  const H = 48
+  const pad = 4
+  const maxY = Math.max(10, ...data.map((h) => h.wpm))
+  const x = (i) => pad + (i / (data.length - 1)) * (W - pad * 2)
+  const y = (v) => pad + (1 - v / maxY) * (H - pad * 2)
+  const d = data.map((h, i) => `${i === 0 ? 'M' : 'L'} ${x(i)} ${y(h.wpm)}`).join(' ')
+  return (
+    <svg className="spark" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none">
+      <path className="spark-line" d={d} />
+      <circle
+        className="spark-dot"
+        cx={x(data.length - 1)}
+        cy={y(data[data.length - 1].wpm)}
+        r="2.5"
+      />
+    </svg>
+  )
+}
+
+function GearIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <circle cx="12" cy="12" r="3" stroke="currentColor" strokeWidth="1.6" />
+      <path
+        d="M12 2.5v2.2M12 19.3v2.2M4.2 4.2l1.55 1.55M18.25 18.25l1.55 1.55M2.5 12h2.2M19.3 12h2.2M4.2 19.8l1.55-1.55M18.25 5.75l1.55-1.55"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+      />
+    </svg>
   )
 }
 
@@ -647,6 +993,48 @@ function advance(eng) {
     eng.endTime = Date.now()
     sample(eng, eng.endTime - eng.startTime) // final point on the graph
   }
+}
+
+// delete back to the start of the previous run of word/non-word characters,
+// clearing statuses as it goes. mirrors a terminal ctrl+backspace.
+function deleteWord(eng) {
+  let p = prevTypable(eng.steps, eng.pos)
+  if (p < 0) return
+  const isWord = (ch) => /[A-Za-z0-9_]/.test(ch)
+  // skip any whitespace/newlines immediately behind the cursor first.
+  while (p >= 0) {
+    const step = eng.steps[p]
+    const ws = step.type === 'newline' || step.ch === ' '
+    if (!ws) break
+    eng.statuses[p] = 'pending'
+    eng.pos = p
+    p = prevTypable(eng.steps, p)
+  }
+  // then remove the contiguous word (or symbol run) that precedes it.
+  if (p >= 0) {
+    const word = isWord(eng.steps[p].ch)
+    while (p >= 0) {
+      const step = eng.steps[p]
+      if (step.type === 'newline' || step.ch === ' ') break
+      if (isWord(step.ch) !== word) break
+      eng.statuses[p] = 'pending'
+      eng.pos = p
+      p = prevTypable(eng.steps, p)
+    }
+  }
+}
+
+// consistency = how steady the raw speed was, as a percentage. based on the
+// coefficient of variation of the per-second raw samples (monkeytype style).
+function computeConsistency(samples) {
+  const vals = (samples || []).map((s) => s.raw).filter((v) => v > 0)
+  if (vals.length < 2) return 0
+  const mean = vals.reduce((a, b) => a + b, 0) / vals.length
+  if (mean === 0) return 0
+  const variance =
+    vals.reduce((a, b) => a + (b - mean) * (b - mean), 0) / vals.length
+  const cv = Math.sqrt(variance) / mean
+  return Math.max(0, Math.min(100, Math.round((1 - cv) * 100)))
 }
 
 function toggle(prev, lang) {
